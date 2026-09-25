@@ -17,8 +17,9 @@ ChatGPT、豆包、通义千问、智谱清言等 AI 对话页面，在选中回
 
 ## 安装
 
-1. 浏览器安装 [ScriptCat](https://www.scriptcat.org/)。
-2. 下载 [hide-ai-selection-menu](./hide-ai-selection-menu.js) 并安装到 ScriptCat。
+1. 浏览器安装 [ScriptCat](https://www.scriptcat.org/) 扩展。
+2. 访问 [AI 对话网页隐藏选中文本菜单](https://scriptcat.org/zh-CN/script-show-page/7900) 在线安装；
+   或下载 [hide-ai-selection-menu](./hide-ai-selection-menu.js) 手动导入。
 
 > 脚本使用 `@run-at document-start`，在页面脚本执行前注入，避免菜单闪现。
 
