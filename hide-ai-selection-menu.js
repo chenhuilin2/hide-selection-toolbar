@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         AI 对话网页隐藏选中文本菜单
 // @namespace    https://chatgpt.com/
-// @version      2.0
+// @version      2.1
 // @description  隐藏 ChatGPT / 豆包 / 通义千问 / 智谱清言 选中文字后弹出的操作菜单
 // @match        https://chatgpt.com/*
 // @match        https://chat.openai.com/*
@@ -19,18 +19,33 @@
     'use strict';
 
     // 每个站点一条规则：
-    //   host    仅在该域名下生效
-    //   targets 菜单容器的候选选择器；keywords 为该容器文本需同时包含的关键词
-    //           （用于防止选择器过宽时误伤其它元素）
+    //   host    仅在该域名下生效的正则
+    //   targets 菜单容器的候选选择器数组
+    //     selector  必填，CSS 选择器
+    //     keywords  可选。容器文本必须**同时**包含这些关键词才算命中，
+    //               用于选择器偏宽时的二次校验（如 CSS Module 类名前缀）
+    //
+    // 精度约定（重要）：
+    //   没有 keywords 的 target 视为「高精度选择器」，会在 document-start
+    //   阶段直接写进 CSS 隐藏 —— 抢在首帧之前，且页面重写行内 style 也冲不掉；
+    //   带 keywords 的 target 只能由 JS 逐帧校验后隐藏，会有一帧的闪现。
+    //   所以宽泛选择器（如 [class*="menu"]）务必配上 keywords。
+    //
+    // ⚠️ keywords 里的文案会随站点改版变化。ChatGPT 的菜单项改版后只剩
+    //    「询问 ChatGPT / 分享所选内容」，原来的 keywords.every() 判定永远
+    //    失败、规则静默失效。主力选择器请认准稳定的语义标识，keywords
+    //    只留给兜底选择器加保险。
     const RULES = [
         {
             // ChatGPT
             host: /(^|\.)(chatgpt\.com|chat\.openai\.com)$/,
             targets: [
-                {
-                    selector: 'div.shadow-long.flex.overflow-hidden.rounded-xl',
-                    keywords: ['询问 ChatGPT', '开始写作', '分享所选内容']
-                }
+                // 选区浮层最外层。类名形如 `<hash>_selectionPopover`：
+                // hash 随构建变化、语义后缀 selectionPopover 稳定，且该字符串
+                // 足够独特，无需关键词校验 → 走进 CSS 层，彻底不闪现。
+                { selector: '[class*="selectionPopover"]' },
+                // 兜底：旧版内层容器。菜单项文案/数量会变，只用最稳定的那一项校验。
+                { selector: 'div.shadow-long.flex.overflow-hidden.rounded-xl', keywords: ['询问 ChatGPT'] }
             ]
         },
         {
@@ -62,14 +77,54 @@
     const rules = RULES.filter(rule => rule.host.test(location.hostname));
     if (rules.length === 0) return;
 
+    // ---- CSS 层：抢在首帧渲染之前隐藏高精度选择器命中的菜单 ----
+    // 页面重写浮层行内 style（锚点偏移等）冲掉 display:none 的情况，也由它兜住。
+    // 每条选择器单独成一块规则：CSS 的逗号列表里只要有一个选择器不被支持，
+    // 整条规则都会被丢弃，导致所有规则一起失效。
+    const cssText = rules
+        .reduce((list, rule) => list.concat(rule.targets), [])
+        .filter(target => !target.keywords)
+        .map(target => `${target.selector} {\n    display: none !important;\n}`)
+        .join('\n');
+
+    if (cssText) {
+        const style = document.createElement('style');
+        style.id = 'hide-ai-selection-menu-style';
+        style.textContent = cssText;
+
+        const root = document.head || document.documentElement;
+        if (root) {
+            root.appendChild(style);
+        } else {
+            document.addEventListener('DOMContentLoaded', () => {
+                (document.head || document.documentElement).appendChild(style);
+            }, { once: true });
+        }
+    }
+
     function hideSelectionMenu() {
         for (const rule of rules) {
             for (const { selector, keywords } of rule.targets) {
-                document.querySelectorAll(selector).forEach(menu => {
-                    if (menu.style.display === 'none') return;
-                    if (keywords && !keywords.every(k => menu.textContent.includes(k))) return;
+                let menus;
+                try {
+                    menus = document.querySelectorAll(selector);
+                } catch (e) {
+                    continue; // 选择器不合法时只跳过它，别让整轮清理中断
+                }
+
+                for (const menu of menus) {
+                    // 幂等：已经是目标状态就跳过，避免自己触发 observer 空转。
+                    // 但不能靠 dataset 打标记永久跳过 —— 这类浮层带页面自己算出来的
+                    // 行内样式，页面重写 style 时会把 display:none 一起冲掉，
+                    // 必须每轮重新校验、自动补回。
+                    if (menu.style
+                        && menu.style.getPropertyValue('display') === 'none'
+                        && menu.style.getPropertyPriority('display') === 'important') {
+                        continue;
+                    }
+                    if (keywords && !keywords.every(k => menu.textContent.includes(k))) continue;
                     menu.style.setProperty('display', 'none', 'important');
-                });
+                }
             }
         }
     }
@@ -89,8 +144,24 @@
         });
     }
 
-    new MutationObserver(scheduleHide).observe(document.documentElement, {
-        childList: true,
-        subtree: true
-    });
+    if (document.documentElement) {
+        new MutationObserver(scheduleHide).observe(document.documentElement, {
+            childList: true,
+            subtree: true,
+            // 菜单被页面「重新 show」时往往只改 class/style，只看 childList 会漏掉
+            attributes: true,
+            attributeFilter: ['class', 'style']
+        });
+    }
+
+    // 兜底轮询：少数菜单由页面定时器插入、或只改属性，observer 可能漏掉。
+    // 前 30 秒密集一点，之后降到 3 秒当保险。
+    let ticks = 0;
+    const timer = setInterval(() => {
+        hideSelectionMenu();
+        if (++ticks === 120) {
+            clearInterval(timer);
+            setInterval(hideSelectionMenu, 3000);
+        }
+    }, 250);
 })();
