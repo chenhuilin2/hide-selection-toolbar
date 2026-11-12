@@ -2,7 +2,10 @@
 
 **划词之后，别再弹东西。** 一个轻量油猴脚本，隐藏网页里「选中文本就冒出来」的浮动工具条——AI 对话页的「引用 / 复制 / 朗读」菜单、在线文档的「评论 / AI 写作 / 加粗」工具条，统统不出现，划词、复制、阅读都不再被挡。
 
-<kbd>v2.9</kbd> <kbd>MIT License</kbd> <kbd>9 个站点</kbd> ｜ [**安装脚本 →**](https://scriptcat.org/zh-CN/script-show-page/7900)
+[![version](https://img.shields.io/badge/version-2.9-blue)](./hide-ai-selection-menu.js)
+[![license](https://img.shields.io/badge/license-MIT-green)](./README.md)
+[![sites](https://img.shields.io/badge/sites-9-brightgreen)](./README.md)
+[![ScriptCat](https://img.shields.io/badge/ScriptCat-Install-orange)](https://scriptcat.org/zh-CN/script-show-page/7900)
 
 ## 为什么需要它
 
