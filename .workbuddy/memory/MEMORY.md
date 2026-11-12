@@ -67,7 +67,14 @@
   一旦远端/本地同时出现 `readme.md` 和 `README.md`，merge 会在索引里塞进两条记录，
   而文件系统不区分大小写，小写那份会直接覆盖大写文件的内容。
   修法：`git rm --cached readme.md` → `git show HEAD:README.md > README.md` → `git add` → `git commit --amend --no-edit`。
-- 仓库是**公开**的（github.com/chenhuilin2/hide-ai-selection-menu）。`.gitignore` 已被删除，
-  但 `.workbuddy/memory/*` 与 `test/userscript.test.js` **早已被跟踪**，仍会随提交推到公开仓库；
-  要让 `.workbuddy` 退出公开仓库需 `git rm -r --cached .workbuddy`（用户尚未决定）。
-  写 memory 时注意：**假设这些笔记会公开可见**，别记敏感信息。
+- 仓库是**公开**的：**github.com/chenhuilin2/hide-selection-toolbar**，分支 `main`。
+  2026-11-12 迁移过一次：旧仓库 `hide-ai-selection-menu` 被删除（远端返回 Repository not found），
+  故另建同名目的新仓库。**旧地址已失效，勿再使用**。
+  - 本机没有 `gh` CLI；创建仓库走 GitHub API + `git credential fill` 取到的 token（PowerShell 的
+    Invoke-RestMethod 能通，bash 里的 `curl` 因代理端口不通会 exit 7/28）。
+  - 分支从 `master` 改名为 `main`（与新仓库默认分支一致），本地旧 `main` 已删。
+  - `.workbuddy/memory/*` 与 `test/userscript.test.js` **早已被跟踪**，会随提交推到公开仓库；
+    要让 `.workbuddy` 退出公开仓库需 `git rm -r --cached .workbuddy`（用户尚未决定）。
+  - ⚠️ 脚本文件名仍是 `hide-ai-selection-menu.js`（**没跟着仓库改名**）。ScriptCat 按 `@name` +
+    `@namespace` 识别脚本，文件改名会让已安装用户的 raw 直链失效，收益为零。
+- 写 memory 时注意：**假设这些笔记会公开可见**，别记敏感信息。
