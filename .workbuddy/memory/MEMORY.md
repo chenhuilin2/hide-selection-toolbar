@@ -3,7 +3,8 @@
 ## 项目性质
 油猴脚本，隐藏**选中文本后弹出的浮动工具条**。v2.6 起范围从「AI 对话」扩到「AI 对话 + 网页文档」。
 - AI 对话：ChatGPT / 豆包 / 通义千问 / 智谱清言 / 文心一言（yiyan + wenxin）/ 讯飞星火
-- 网页文档：语雀（`*.yuque.com`，划词的「评论 / 笔记」工具条）
+- 网页文档：语雀（`*.yuque.com`，阅读态 + 编辑态）、腾讯文档（`docs.qq.com`，编辑态格式条）、
+  金山文档（`kdocs.cn`，阅读态浮层）
 
 核心配置是 `hide-ai-selection-menu.js` 里的 `RULES` 数组。
 
@@ -49,13 +50,22 @@
   **必须带 `float` 这个限定词**——顶部固定菜单栏也挂 `toolbar_container__3r-Et`，
   只认它就等于把整个顶部菜单干掉。反例：不带 `float-toolbar` 的 `toolbar_container`。
   容器内还有一份 `toolbar_hidden__2I957` 的量宽副本，会被一起隐藏（无可见副作用）。
+- 金山文档（`kdocs.cn`，WPS 云文档）：阅读态浮层 **少见的带 id** —— `#floatMenu`（CSS 层）
+  + 兜底 `[id^="floatMenu"]`。kd 组件库其余（`kd-button` / `kd-icon` / `kd-divider`）全是 class，
+  只有这个浮层有 id，所以 id 是最稳的锚点。反例：`rightClickMenu`（同命名风格、不含 floatMenu 前缀），
+  守住「不许放大成 `[id*="Menu"]`」。**注意 `docs.wps.cn` 是 WPS 365 的另一套域名，未确认前不要放开。**
 
 ## 验证
-- `node test/userscript.test.js` —— 最小 DOM 桩回归测试（无浏览器/无 jsdom），按站点分块，当前 65 项断言。
+- `node test/userscript.test.js` —— 最小 DOM 桩回归测试（无浏览器/无 jsdom），按站点分块，当前 80 项断言。
 - 加站点时：把真实 DOM 存进 `dom/`，在测试里加一个 `xxxFixture()` 并在 `run(hostname, fixture)` 后补断言，再改代码。
   同产品的每个入口域名都要用同一个 fixture 各跑一遍。
-- 桩必须支持脚本会用到的全部选择器形态：`=` / `*=` / `^=` / `$=` / 存在性属性选择器、复合多类、逗号分组。
-  漏掉任何一种都会让规则"看起来失效"，而问题其实在桩上。
+- 桩必须支持脚本会用到的全部选择器形态：`#id` / `.class` / `=` / `*=` / `^=` / `$=` / 存在性属性选择器、
+  复合多类、逗号分组。漏掉任何一种都会让规则"看起来失效"，而问题其实在桩上。
+- **`mkEl` 必须把 `id` 和 `class` 同时写进 `attrs`**（`[id^="x"]`、`[class*="y"]` 读的是属性）。
+  只放 `el.id` / `el.className` 会让这两类选择器在桩里静默失配 —— 和当初 `cls` 漏写是同一个坑，
+  已经在 `mkEl` 里修过，别再退回去。id 为空时不要塞，否则 `[id]` 存在性选择器会把所有元素算命中。
+- 断言 CSS 里是否含某 id 选择器时别用 `includes('#floatMenu')` —— `#floatMenuOLD` 也含这个子串。
+  用 `/#floatMenu\s*\{/.test(css)`，否则盖不住"主选择器被改坏"。
 - `run()` 返回 `{ css, tick, started }`：站点没匹配上时脚本提前 return，`tick` 兜底为空函数（**别让它崩掉整个套件**），
   是否真的跑起来用 `started` 断言。
 - 每个站点除正例外要留**反例**：既要有"同名容器但文本不含 keywords"的，也要有

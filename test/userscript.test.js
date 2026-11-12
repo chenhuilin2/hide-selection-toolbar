@@ -89,12 +89,17 @@ function matchesAll(el, sel) {
 }
 
 function mkEl({ tag = 'div', cls = '', id = '', attrs = {}, style = {}, text = '', children = [] } = {}) {
+    // 真实 DOM 里 id / class 既是元素属性、也能被属性选择器命中
+    // （`[id^="x"]`、`[class*="y"]`）。桩若只把它们放在 el.id / el.className 上，
+    // 这两类选择器会静默判为失配 —— 桩坏了和脚本错了表现完全一样。
+    // id 为空时不能塞进去，否则 `[id]` 这个存在性选择器会把所有元素都算命中。
+    const attrMap = Object.assign({ class: cls }, id ? { id } : {}, attrs);
+
     const el = {
         tagName: tag.toUpperCase(),
         className: cls,
         id,
-        // 让 [class*="..."] 也能在桩里命中
-        attrs: Object.assign({ class: cls }, attrs),
+        attrs: attrMap,
         removed: false,
         isConnected: true,
         dataset: {},
@@ -371,6 +376,53 @@ function tencentFixture() {
     return { floatBar, floatBarNewHash, visibleBar, topToolbar };
 }
 
+// dom/金山文档-阅读态.html（选中文字后弹出的浮动菜单）
+function kdocsFixture() {
+    const btn = (label, iconCls) => mkEl({
+        cls: 'wo-button',
+        children: [mkEl({
+            tag: 'button',
+            attrs: { type: 'button' },
+            cls: 'kd-button kd-button-light kd-button-m',
+            children: [
+                mkEl({ tag: 'span', cls: 'kd-button-children', text: label }),
+                mkEl({ tag: 'i', cls: 'kd-icon ' + iconCls, children: [mkEl({ tag: 'svg' })] }),
+            ],
+        })],
+    });
+
+    // 正例：页面靠给它加 active 类来显示
+    const floatMenu = mkEl({
+        id: 'floatMenu',
+        cls: ' active',
+        // 页面按选区算的定位，滚动 / 重新划词会被重写
+        style: { left: { v: '341px' }, top: { v: '1425.03px' } },
+        children: [
+            btn('问问 AI', 'kd-icon-pro kd-icon-airplane_normal'),
+            btn('', 'kd-icon-book_star_gradient'),
+            mkEl({ cls: 'kd-divider kd-divider-vertical', attrs: { role: 'separator' } }),
+            btn('', 'kd-icon-bubble_add'),
+            btn('', 'kd-icon-more'),
+        ],
+    });
+
+    // 兜底用例：id 加了后缀，靠 [id^="floatMenu"] 命中
+    const floatMenuSuffixed = mkEl({
+        id: 'floatMenu-v2',
+        style: { left: { v: '10px' } },
+        children: [btn('问问 AI', 'kd-icon-airplane_normal')],
+    });
+
+    // 反例：页面里其它浮动菜单（右键菜单之类），与 floatMenu 同命名风格但不含该前缀。
+    // 这条守住「不许放大成 [id*="Menu"]」—— 那样 kdocs 的各式菜单会被一并隐藏。
+    const decoyMenu = mkEl({
+        id: 'rightClickMenu',
+        children: [btn('复制', 'kd-icon-copy')],
+    });
+
+    return { floatMenu, floatMenuSuffixed, decoyMenu };
+}
+
 function run(hostname, fx) {
     const all = Object.values(fx);
     let tick = null;
@@ -585,6 +637,45 @@ const mq1 = tencentFixture();
 const mq2 = run('mail.qq.com', mq1);
 a(!mq2.started && mq2.css === '', '同主域的其它站点（mail.qq.com）不注入');
 a(!hidden(mq1.floatBar), '非目标域名上的同结构元素未被误伤');
+
+/* ============================ 金山文档 ============================ */
+
+const kd = kdocsFixture();
+const k = run('www.kdocs.cn', kd);
+
+console.log('\n===== 金山文档 (www.kdocs.cn) =====');
+console.log('\n[22] 注入的 CSS');
+a(k.started, '脚本在 www.kdocs.cn 上启动');
+a(/#floatMenu\s*\{/.test(k.css), '浮动菜单的 id 锚点已进 CSS 层（抢在首帧前隐藏）');
+a(k.css.includes('[id^="floatMenu"]'), '兜底的前缀锚点同样在 CSS 层');
+a((k.css.match(/\{/g) || []).length === 2, '两条选择器各自成块，不是逗号合并的列表');
+a(!k.css.includes('float-toolbar_container'),
+    '站点隔离：没有串入腾讯文档的规则');
+
+console.log('\n[23] 首轮清理');
+k.tick();
+a(hidden(kd.floatMenu), '浮动菜单（问问 AI / 收藏 / 评论 / 更多）已隐藏');
+a(hidden(kd.floatMenuSuffixed), 'id 加了后缀时由前缀兜底命中：未把 id 写死');
+a(!hidden(kd.decoyMenu), '不含 floatMenu 前缀的其它浮动菜单（rightClickMenu）未被误伤');
+
+console.log('\n[24] 重新划词（页面重写行内定位）');
+kd.floatMenu.style = mkStyle({ left: { v: '50px' }, top: { v: '900px' } });
+a(!hidden(kd.floatMenu), '已模拟页面重写定位、冲掉 display:none');
+k.tick();
+a(hidden(kd.floatMenu), '下一轮清理自动补回隐藏');
+a(kd.floatMenu.style.getPropertyValue('left') === '50px', '页面自身的定位未被破坏');
+
+console.log('\n[25] 域名边界');
+const kq1 = kdocsFixture();
+const kq2 = run('kdocs.cn.evil.com', kq1);
+a(!kq2.started, '仿冒域 kdocs.cn.evil.com 不注入任何规则');
+const wq1 = kdocsFixture();
+const wq2 = run('docs.wps.cn', wq1);
+a(!wq2.started && wq2.css === '', 'WPS 365（docs.wps.cn）是另一套域名，未经确认前不放开');
+a(!hidden(wq1.floatMenu), '非目标域名上的同结构元素未被误伤');
+const bare = kdocsFixture();
+const bareRun = run('kdocs.cn', bare);
+a(bareRun.started, '裸域 kdocs.cn 同样生效');
 
 console.log(`\n结果：${pass} 通过 / ${fail} 失败\n`);
 process.exit(fail ? 1 : 0);
