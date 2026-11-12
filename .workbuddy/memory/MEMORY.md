@@ -45,9 +45,13 @@
     `ne-card-toolbar` 单独出现（块级工具栏）。
 - **NE 设计系统的类名不是 CSS Module、没有哈希**（`ne-icon`、`ne-card-toolbar` 这类 BEM 风格），
   比哈希类名稳定得多，但一个元素常挂多个类名，必须挑限定名。
+- 腾讯文档：`[class*="float-toolbar_container"]`（CSS 层）。
+  **必须带 `float` 这个限定词**——顶部固定菜单栏也挂 `toolbar_container__3r-Et`，
+  只认它就等于把整个顶部菜单干掉。反例：不带 `float-toolbar` 的 `toolbar_container`。
+  容器内还有一份 `toolbar_hidden__2I957` 的量宽副本，会被一起隐藏（无可见副作用）。
 
 ## 验证
-- `node test/userscript.test.js` —— 最小 DOM 桩回归测试（无浏览器/无 jsdom），按站点分块，当前 54 项断言。
+- `node test/userscript.test.js` —— 最小 DOM 桩回归测试（无浏览器/无 jsdom），按站点分块，当前 65 项断言。
 - 加站点时：把真实 DOM 存进 `dom/`，在测试里加一个 `xxxFixture()` 并在 `run(hostname, fixture)` 后补断言，再改代码。
   同产品的每个入口域名都要用同一个 fixture 各跑一遍。
 - 桩必须支持脚本会用到的全部选择器形态：`=` / `*=` / `^=` / `$=` / 存在性属性选择器、复合多类、逗号分组。

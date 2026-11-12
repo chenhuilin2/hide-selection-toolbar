@@ -312,6 +312,65 @@ function yuqueFixture() {
     return { bar, barNewHash, bareItem, decoyTooltip, editBar, editBarReordered, blockToolbar };
 }
 
+// dom/腾讯文档-编辑态.html（选中文字后弹出的浮动格式工具栏）
+function tencentFixture() {
+    const btn = (id, label) => mkEl({
+        attrs: { id, role: 'button', 'aria-label': label },
+        cls: 'buttons_actual__2bXuf',
+        children: [mkEl({
+            cls: 'buttons_icon__nRCff',
+            attrs: { role: 'button', 'aria-label': label },
+            children: [mkEl({ tag: 'svg' })],
+        })],
+    });
+
+    // 量宽度用的隐藏副本：多一个 toolbar_hidden 类 + aria-hidden
+    const measureCopy = mkEl({
+        cls: 'toolbar-container toolbar_container__3r-Et toolbar_hidden__2I957',
+        attrs: { 'aria-hidden': 'true' },
+        children: [btn('toolbar-button-ai-optimize', 'AI编辑'), btn('toolbar-button-bold', '加粗')],
+    });
+
+    const visibleBar = mkEl({
+        cls: 'toolbar-container toolbar_container__3r-Et',
+        children: [btn('toolbar-button-ai-optimize', 'AI编辑'), btn('toolbar-button-bold', '加粗')],
+    });
+
+    const floatBar = mkEl({
+        cls: 'float-toolbar_container__zdDax',
+        // 页面按选区算的定位，滚动 / 重新选词会被重写
+        style: { top: { v: '159.655px' } },
+        children: [
+            mkEl({
+                attrs: { role: 'toolbar', tabindex: '0' },
+                children: [measureCopy, visibleBar],
+            }),
+        ],
+    });
+
+    // 关键回归：构建哈希变化（__zdDax → __Q7xZ）仍须命中
+    const floatBarNewHash = mkEl({
+        cls: 'float-toolbar_container__Q7xZ',
+        children: [mkEl({
+            attrs: { role: 'toolbar' },
+            children: [mkEl({
+                cls: 'toolbar-container toolbar_container__3r-Et',
+                children: [btn('toolbar-button-bold', '加粗')],
+            })],
+        })],
+    });
+
+    // 反例：顶部固定菜单栏。同样挂 toolbar-container / toolbar_container__3r-Et，
+    // 但没有 float-toolbar 这一层 —— 拿通用类当锚点会把整个顶部菜单干掉，
+    // 那是编辑器的核心入口。这条守住选择器不被放宽。
+    const topToolbar = mkEl({
+        cls: 'toolbar-container toolbar_container__3r-Et',
+        children: [btn('toolbar-button-bold', '加粗')],
+    });
+
+    return { floatBar, floatBarNewHash, visibleBar, topToolbar };
+}
+
 function run(hostname, fx) {
     const all = Object.values(fx);
     let tick = null;
@@ -493,6 +552,39 @@ const fake = yuqueFixture();
 const fk = run('notyuque.com', fake);
 a(!fk.started && fk.css === '', 'notyuque.com 这类仿冒域名不注入任何规则');
 a(!hidden(fake.bar), '非目标域名上的同名元素未被误伤');
+
+/* ============================ 腾讯文档 ============================ */
+
+const td = tencentFixture();
+const tr = run('docs.qq.com', td);
+
+console.log('\n===== 腾讯文档 (docs.qq.com) =====');
+console.log('\n[18] 注入的 CSS');
+a(tr.css.includes('[class*="float-toolbar_container"]'), '浮动格式工具栏锚点已进 CSS 层');
+a((tr.css.match(/\{/g) || []).length === 1, '单条选择器单独成块');
+a(!tr.css.includes('wording-tooltip-module') && !tr.css.includes('ne-select-helper-toolbar'),
+    '站点隔离：没有串入语雀的规则');
+
+console.log('\n[19] 首轮清理');
+tr.tick();
+a(hidden(td.floatBar), '浮动格式工具栏已隐藏');
+a(hidden(td.floatBarNewHash), '构建哈希变化后（__zdDax → __Q7xZ）仍命中：未把哈希写死');
+a(!hidden(td.topToolbar), '顶部菜单栏（同 toolbar_container 类、但没有 float-toolbar）未被误伤');
+
+console.log('\n[20] 重新划词（工具栏被页面重新定位）');
+td.floatBar.style = mkStyle({ top: { v: '800px' } });
+a(!hidden(td.floatBar), '已模拟页面重写定位、冲掉 display:none');
+tr.tick();
+a(hidden(td.floatBar), '下一轮清理自动补回隐藏');
+
+console.log('\n[21] 域名边界');
+const tq1 = tencentFixture();
+const tq2 = run('docs.qq.com.evil.com', tq1);
+a(!tq2.started, '仿冒域 docs.qq.com.evil.com 不注入任何规则');
+const mq1 = tencentFixture();
+const mq2 = run('mail.qq.com', mq1);
+a(!mq2.started && mq2.css === '', '同主域的其它站点（mail.qq.com）不注入');
+a(!hidden(mq1.floatBar), '非目标域名上的同结构元素未被误伤');
 
 console.log(`\n结果：${pass} 通过 / ${fail} 失败\n`);
 process.exit(fail ? 1 : 0);
