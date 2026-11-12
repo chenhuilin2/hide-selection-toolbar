@@ -58,13 +58,22 @@ function matchOne(el, s) {
             if (!m || el.id !== m[1]) return false;
             i += 1 + m[1].length;
         } else if (ch === '[') {
-            const m = rest.slice(i).match(/^\[([\w-]+)(?:\*="([^"]*)")?\]/);
+            // 支持 [attr] / [attr="v"] / [attr*="v"] / ^= / $=。
+            // 只实现 *= 会漏掉 [data-testid="x"] 这类精确匹配，静默判为不匹配。
+            const m = rest.slice(i).match(/^\[([\w-]+)(?:([~^$*|]?=)"([^"]*)")?\]/);
             if (!m) return false;
-            const [, name, val] = m;
-            if (val === undefined) {
+
+            const [, name, op, want] = m;
+            if (op === undefined) {
                 if (el.attrs[name] === undefined) return false;   // 存在性选择器
-            } else if (!String(el.attrs[name] || '').includes(val)) {
-                return false;
+            } else {
+                const have = String(el.attrs[name] === undefined ? '' : el.attrs[name]);
+                const ok = op === '=' ? have === want
+                    : op === '*=' ? have.includes(want)
+                        : op === '^=' ? have.startsWith(want)
+                            : op === '$=' ? have.endsWith(want)
+                                : false;
+                if (!ok) return false;
             }
             i += m[0].length;
         } else {
@@ -106,42 +115,211 @@ function mkEl({ tag = 'div', cls = '', id = '', attrs = {}, style = {}, text = '
 }
 
 /* ============================ 测试夹具 ============================ */
-// 结构照抄 dom/gpt.html
+// 结构照抄 dom/*.html —— 加站点时在这里补一个 xxxFixture()，再补一段断言
 
+// dom/gpt.html（2026-11 改版后的新结构：纯 Tailwind 工具类，没有任何稳定标识）
 function fixture() {
-    const inner = mkEl({
-        cls: 'shadow-long flex overflow-hidden rounded-xl',
+    const bar = mkEl({
+        cls: 'pointer-events-none w-max fixed z-50',
+        // 页面按选区实时算的行内定位，滚动 / 重新划词都会被重写
+        style: { left: { v: '471.932px' }, top: { v: '182.824px' } },
         children: [
-            mkEl({ tag: 'button', children: [mkEl({ tag: 'span', text: '询问 ChatGPT' })] }),
-            mkEl({ tag: 'button', children: [mkEl({ tag: 'span', text: '分享所选内容' })] }),
+            mkEl({
+                attrs: { role: 'presentation' },
+                cls: 'pointer-events-auto flex w-fit max-w-full overflow-hidden rounded-lg border border-border/70 bg-surface-elevated-secondary shadow-lg',
+                children: [
+                    mkEl({
+                        tag: 'button',
+                        attrs: { type: 'button' },
+                        cls: 'no-drag cursor-interaction whitespace-nowrap flex border gap-1 rounded-full',
+                        text: '向 ChatGPT 提问',
+                    }),
+                    mkEl({ attrs: { 'aria-hidden': 'true' }, cls: 'w-px shrink-0 self-stretch bg-border last:hidden' }),
+                ],
+            }),
         ],
     });
 
-    const popover = mkEl({
-        attrs: { popover: 'manual', 'aria-live': 'polite' },
-        cls: 'fixed top-auto bottom-0 h-fit z-50 m-0 overflow-visible border-0 bg-transparent p-0 select-none PDq2pG_selectionPopover',
-        // 页面自己维护的锚点样式，改版后会被重写
-        style: { 'position-anchor': { v: '--targeted-action-selection' } },
-        children: [inner],
+    // 反例：同一套浮动层工具类，但文本不含品牌名 —— 悬浮提示之类的正常元素。
+    // 这条守着「结构选择器必须配 keywords」这个前提：
+    // 一旦有人觉得"选择器够具体了"把 keywords 去掉，它会被悄悄隐藏，这里立刻报错。
+    const tooltip = mkEl({
+        cls: 'pointer-events-none w-max fixed z-50',
+        children: [mkEl({ tag: 'span', text: '复制' })],
     });
 
-    // 反例：命中选择器但文本不含关键词，属正常元素，不能被误伤
-    const decoy = mkEl({
-        cls: 'shadow-long flex overflow-hidden rounded-xl',
-        children: [mkEl({ tag: 'span', text: '这是一段正文，不是菜单' })],
+    // 关键回归：按钮文案已经改过一轮（「询问 ChatGPT / 分享所选内容」→「向 ChatGPT 提问」），
+    // 以后还会改。keywords 只认品牌名，就是为了不随文案改版失效。
+    const barReworded = mkEl({
+        cls: 'pointer-events-none w-max fixed z-50',
+        children: [mkEl({ tag: 'button', text: 'Ask ChatGPT' })],
     });
 
-    return { popover, inner, decoy };
+    return { bar, tooltip, barReworded };
 }
 
-function run(fx) {
+// dom/文心一言.html（取样自 wenxin.baidu.com，同一套页面也挂在 yiyan.baidu.com）
+function yiyanFixture() {
+    const bar = mkEl({
+        attrs: { 'data-testid': 'selection-bar' },
+        cls: '_chat-selection-bar_17n4z_23 _fit-content_17n4z_28',
+        // 页面自己写的定位，改版/滚动时会被重写
+        style: { inset: { v: '2139.67px auto auto 181px' } },
+        children: [
+            mkEl({
+                cls: '_chat-selection-bar-button-group_17n4z_34',
+                children: [
+                    mkEl({ tag: 'button', text: '引用' }),
+                    mkEl({ tag: 'button', text: '复制' }),
+                    mkEl({ tag: 'button', text: '翻译' }),
+                ],
+            }),
+        ],
+    });
+
+    // 反例：命中兜底类名，但没有 data-testid、文本也不含关键词
+    const decoy = mkEl({
+        cls: '_chat-selection-bar_17n4z_23 _fit-content_17n4z_28',
+        children: [mkEl({ tag: 'span', text: '一段普通正文' })],
+    });
+
+    // 关键回归：菜单项改版、文案不再含「引用 / 复制」，只有主选择器能覆盖它。
+    // 这条决定了 keywords 永远不该长在主力选择器上。
+    const barCopyChanged = mkEl({
+        attrs: { 'data-testid': 'selection-bar' },
+        cls: '_chat-selection-bar_17n4z_23 _fit-content_17n4z_28',
+        children: [
+            mkEl({
+                cls: '_chat-selection-bar-button-group_17n4z_34',
+                children: [
+                    mkEl({ tag: 'button', text: '翻译' }),
+                    mkEl({ tag: 'button', text: '解释' }),
+                ],
+            }),
+        ],
+    });
+
+    return { bar, decoy, barCopyChanged };
+}
+
+// dom/讯飞星火.html
+function xinghuoFixture() {
+    const quoteImg = () => mkEl({
+        tag: 'img',
+        attrs: { src: '/vulcan/static/media/quote_svg.27e5741d60acee4c2886833665441ff1.svg', alt: '' },
+    });
+
+    const bar = mkEl({
+        cls: 'CodeWin_quote__02wVL',
+        // 页面自己算的锚点定位，关掉菜单/滚动时会被重写
+        style: { top: { v: '118.667px' }, left: { v: '191.604px' } },
+        text: '引用',
+        children: [quoteImg()],
+    });
+
+    // 关键回归：CSS Module 的哈希会随构建变，只要语义段不变就该照样命中。
+    // 这条拦住「把哈希写死进选择器」的写法。
+    const barNewHash = mkEl({
+        cls: 'CodeWin_quote__9xK2p',
+        text: '引用',
+        children: [quoteImg()],
+    });
+
+    // 反例：输入框里的引用气泡。同样含 quote、同样写着「引用」，
+    // 但模块名前缀不是 CodeWin —— 属于正常功能元素，绝不能误伤。
+    const decoyQuoteBox = mkEl({
+        cls: 'InputArea_quoteBox__3ab21',
+        text: '引用',
+        children: [mkEl({ tag: 'span', text: '被引用的上文' })],
+    });
+
+    return { bar, barNewHash, decoyQuoteBox };
+}
+
+// dom/语雀.html（划词后弹出的「评论 / 笔记」工具条）
+// 关键特征：整条只有两个 <svg> 图标，**没有任何文字** —— keywords 在这里必然失效，
+// 所以误伤面只能靠选择器精度控制，下面的反例就是在守这条底线。
+function yuqueFixture() {
+    const icon = (name) => mkEl({
+        cls: 'ne-icon ne-icon-' + name,
+        attrs: { 'data-name': name },
+        style: { 'font-size': { v: '16px' } },
+        children: [mkEl({ tag: 'svg', cls: 'ne-icon-symbol', attrs: { 'aria-hidden': 'true' } })],
+    });
+
+    const itemWrapper = (name) => mkEl({
+        tag: 'span',
+        cls: 'wording-tooltip-module_itemWrapper__1BQ9b',
+        children: [icon(name)],
+    });
+
+    const bar = mkEl({
+        cls: 'wording-tooltip-module_toolTipContent__NHFlD',
+        children: [itemWrapper('card-tb-comment'), itemWrapper('Note')],
+    });
+
+    // 关键回归：哈希随构建变（__NHFlD → __Xy8Qz），模块名 + 语义名不变就该照样命中。
+    const barNewHash = mkEl({
+        cls: 'wording-tooltip-module_toolTipContent__Xy8Qz',
+        children: [itemWrapper('card-tb-comment')],
+    });
+
+    // 模块级兜底：结构残缺、只剩一个 itemWrapper 时也要能隐藏
+    const bareItem = mkEl({
+        tag: 'span',
+        cls: 'wording-tooltip-module_itemWrapper__1BQ9b',
+        children: [icon('Note')],
+    });
+
+    // 反例：语义名相同（toolTipContent）但模块前缀不同 —— 页面别处的 tooltip，正常功能。
+    // 这条拦住「放宽成 [class*="toolTipContent"]」这种"看着更稳"的改法。
+    const decoyTooltip = mkEl({
+        cls: 'editor-tooltip-module_toolTipContent__k2P9a',
+        children: [mkEl({ tag: 'span', text: '提示文字' })],
+    });
+
+    // ---- 编辑态工具条（dom/语雀-编辑态.html）：ne-card-toolbar + ne-select-helper-toolbar ----
+    const tbItem = (name, lark) => mkEl({
+        cls: 'ne-card-toolbar-item ne-card-toolbar-item-has-title',
+        children: [
+            mkEl({
+                cls: lark ? 'ne-icon ne-lark-icon' : 'ne-icon ne-icon-' + name,
+                attrs: { 'data-name': name },
+                children: [mkEl({ tag: 'svg', cls: 'larkui-icon' })],
+            }),
+        ],
+    });
+
+    const editBar = mkEl({
+        cls: 'ne-card-toolbar ne-select-helper-toolbar',
+        children: [tbItem('IconAiTagNew', true), tbItem('card-tb-comment', false)],
+    });
+
+    // NE 设计系统的类名不是 CSS Module、没有哈希，但类名顺序和追加的修饰类会变，
+    // 所以选择器不能依赖「两个类名紧挨着、顺序固定」。
+    const editBarReordered = mkEl({
+        cls: 'ne-select-helper-toolbar ne-card-toolbar is-visible',
+        children: [tbItem('IconAiTagNew', true)],
+    });
+
+    // 反例：块级工具栏（段落左侧那套），只挂通用类 ne-card-toolbar。
+    // 这条守住「不能拿 ne-card-toolbar 当锚点」：一旦那么写，编辑器的正常功能会被静默干掉。
+    const blockToolbar = mkEl({
+        cls: 'ne-card-toolbar ne-card-toolbar-hover',
+        children: [tbItem('drag', false), tbItem('duplicate', false)],
+    });
+
+    return { bar, barNewHash, bareItem, decoyTooltip, editBar, editBarReordered, blockToolbar };
+}
+
+function run(hostname, fx) {
     const all = Object.values(fx);
     let tick = null;
     let styleEl = null;
 
     const define = (k, v) => Object.defineProperty(global, k, { value: v, configurable: true, writable: true });
 
-    define('location', { hostname: 'chatgpt.com' });
+    define('location', { hostname });
     define('document', {
         readyState: 'complete',
         documentElement: { appendChild() {}, style: {} },
@@ -158,7 +336,11 @@ function run(fx) {
 
     eval(src);   // 执行被测脚本
 
-    return { css: styleEl ? styleEl.textContent : '', tick };
+    // 规则没匹配到本站点时脚本会提前 return，tick 就是 null。
+    // 这里给个空函数兜底：否则手动驱动时会 TypeError 崩掉整个套件，
+    // 后面的断言全部丢失 —— 而"规则失效"恰恰是最需要看完整失败清单的时候。
+    // 是否真正跑起来用 started 断言。
+    return { css: styleEl ? styleEl.textContent : '', tick: tick || (() => {}), started: !!tick };
 }
 
 /* ============================ 断言 ============================ */
@@ -175,32 +357,142 @@ const hidden = (el) =>
 /* ============================ 执行 ============================ */
 
 const fx = fixture();
-const { css, tick } = run(fx);
+const { css, tick } = run('chatgpt.com', fx);
 
+console.log('===== ChatGPT (chatgpt.com) =====');
 console.log('\n[1] 注入的 CSS');
-a(css.includes('[class*="selectionPopover"]'), '高精度选择器已进 CSS 层（抢在首帧前隐藏）');
+a(css.includes('[class*="selectionPopover"]'), '旧版浮层的语义类名仍进 CSS 层（A/B 兜底）');
+a(!css.includes('pointer-events-none'), '新结构是宽泛工具类 → 不进 CSS 层，只走 JS 校验');
 a(!css.includes('data-word-selection-toolbar'), '只注入当前站点（chatgpt.com）的规则，未串站点');
 a(/\[class\*="selectionPopover"\]\s*\{\s*display: none !important;\s*\}/.test(css),
     '规则块内容为 display:none !important');
 a((css.match(/\{/g) || []).length === 1, '每条选择器单独成块，不是逗号合并的列表');
 
-console.log('\n[2] 首轮清理（keywords 回归）');
+console.log('\n[2] 首轮清理（新结构 + 文案回归）');
 tick();
-a(hidden(fx.popover), '选区浮层已隐藏（菜单项已改成「询问 ChatGPT / 分享所选内容」，不再要求「开始写作」）');
-a(hidden(fx.inner), '兜底选择器 + 单个关键词校验同样命中');
-a(!hidden(fx.decoy), '同名容器但文本不含关键词的正常元素未被误伤');
+a(hidden(fx.bar), '新浮层已隐藏（改版后只剩「向 ChatGPT 提问」一项）');
+a(hidden(fx.barReworded), '按钮文案再改（Ask ChatGPT）也不失效：keywords 只认品牌名');
+a(!hidden(fx.tooltip), '同一套浮动层工具类但文本不含品牌名的悬浮提示未被误伤');
 
 console.log('\n[3] style 被页面重写后的自愈（关键回归）');
-fx.popover.style = mkStyle({ 'position-anchor': { v: '--other-anchor' } });
-a(!hidden(fx.popover), '已模拟页面重写 style、冲掉 display:none');
+fx.bar.style = mkStyle({ left: { v: '600px' }, top: { v: '900px' } });
+a(!hidden(fx.bar), '已模拟页面按新选区重写行内定位、冲掉 display:none');
 tick();
-a(hidden(fx.popover), '下一轮清理自动补回隐藏');
-a(fx.popover.style.getPropertyValue('position-anchor') === '--other-anchor', '页面自身的锚点样式未被破坏');
+a(hidden(fx.bar), '下一轮清理自动补回隐藏');
+a(fx.bar.style.getPropertyValue('left') === '600px', '页面自身的定位未被破坏');
 
 console.log('\n[4] 幂等性');
 tick(); tick(); tick();
-a(hidden(fx.popover), '重复清理状态稳定');
-a(!hidden(fx.decoy), '重复清理不会误伤面扩大');
+a(hidden(fx.bar), '重复清理状态稳定');
+a(!hidden(fx.tooltip), '重复清理不会误伤面扩大');
+
+/* ==================== 文心一言 / 文心助手（百度） ==================== */
+
+const yi = yiyanFixture();
+const y = run('yiyan.baidu.com', yi);
+
+console.log('\n===== 文心一言 (yiyan.baidu.com) =====');
+console.log('\n[5] 注入的 CSS');
+a(y.css.includes('[data-testid="selection-bar"]'), 'data-testid 锚点已进 CSS 层');
+a(!y.css.includes('selectionPopover'), '站点隔离：没有串入 ChatGPT 的规则');
+a((y.css.match(/\{/g) || []).length === 1, '每条选择器单独成块，不是逗号合并的列表');
+
+console.log('\n[6] 首轮清理');
+y.tick();
+a(hidden(yi.bar), '引用工具栏已隐藏');
+a(hidden(yi.barCopyChanged), '菜单项文案改版后（不含「引用 / 复制」）仍被主干选择器隐藏');
+a(!hidden(yi.decoy), '同类名但无 data-testid、文本也不含关键词的元素未被误伤');
+
+console.log('\n[7] style 被页面重写后的自愈');
+yi.bar.style = mkStyle({ inset: { v: '3000px auto auto 20px' } });
+a(!hidden(yi.bar), '已模拟页面重写 inset 定位、冲掉 display:none');
+y.tick();
+a(hidden(yi.bar), '下一轮清理自动补回隐藏');
+a(yi.bar.style.getPropertyValue('inset') === '3000px auto auto 20px', '页面自身的 inset 未被破坏');
+
+/* 同一套页面的第二个入口域名。用户实际用的是 wenxin.baidu.com，
+   最初 host 只写了 yiyan.baidu.com，脚本压根不注入（现象：完全没生效）。
+   这条断言专治「按产品名猜域名」这种失误。 */
+const wx = yiyanFixture();
+const w = run('wenxin.baidu.com', wx);
+
+console.log('\n===== 文心 (wenxin.baidu.com) =====');
+console.log('\n[8] 同一产品的第二个入口域名');
+a(w.css.includes('[data-testid="selection-bar"]'), 'wenxin.baidu.com 同样注入规则');
+a(w.started, 'wenxin.baidu.com 上脚本已运行（注册了清理循环）');
+w.tick();
+a(hidden(wx.bar), 'wenxin.baidu.com 上引用工具栏已隐藏');
+a(hidden(wx.barCopyChanged), '文案改版后仍被主干选择器隐藏');
+
+console.log('\n[9] host 不能过宽');
+const tb = yiyanFixture();
+const t = run('tieba.baidu.com', tb);
+a(t.css === '', '非目标 baidu 子域不注入任何规则');
+a(!t.started, '非目标子域上脚本提前退出，未注册任何监听');
+a(!hidden(tb.bar), '非目标子域上的同名元素未被误伤');
+
+/* ============================ 讯飞星火 ============================ */
+
+const xh = xinghuoFixture();
+const x = run('xinghuo.xfyun.cn', xh);
+
+console.log('\n===== 讯飞星火 (xinghuo.xfyun.cn) =====');
+console.log('\n[10] 注入的 CSS');
+a(x.css.includes('[class*="CodeWin_quote"]'), '语义段锚点已进 CSS 层');
+a(!x.css.includes('selectionPopover'), '站点隔离：没有串入其它站点的规则');
+a((x.css.match(/\{/g) || []).length === 1, '每条选择器单独成块，不是逗号合并的列表');
+
+console.log('\n[11] 首轮清理');
+x.tick();
+a(hidden(xh.bar), '引用工具栏已隐藏');
+a(hidden(xh.barNewHash), 'CSS Module 哈希变化后（__02wVL → __9xK2p）仍命中：未把哈希写死');
+a(!hidden(xh.decoyQuoteBox), '输入框里的引用气泡（模块前缀不同）未被误伤');
+
+console.log('\n[12] style 被页面重写后的自愈');
+xh.bar.style = mkStyle({ top: { v: '900px' }, left: { v: '40px' } });
+a(!hidden(xh.bar), '已模拟页面重写 top/left 定位、冲掉 display:none');
+x.tick();
+a(hidden(xh.bar), '下一轮清理自动补回隐藏');
+a(xh.bar.style.getPropertyValue('top') === '900px', '页面自身的定位未被破坏');
+
+/* ============================ 语雀文档 ============================ */
+
+const yq = yuqueFixture();
+const q = run('www.yuque.com', yq);
+
+console.log('\n===== 语雀文档 (www.yuque.com) =====');
+console.log('\n[13] 注入的 CSS');
+a(q.css.includes('[class*="wording-tooltip-module_toolTipContent"]'), '阅读态：模块名 + 语义名的锚点已进 CSS 层');
+a(q.css.includes('[class*="ne-select-helper-toolbar"]'), '编辑态：限定名锚点已进 CSS 层');
+a((q.css.match(/\{/g) || []).length === 3, '三条选择器各自成块（工具条无文字，全部走 CSS 层）');
+a(!q.css.includes('selectionPopover') && !q.css.includes('CodeWin_quote'), '站点隔离：没有串入其它站点的规则');
+
+console.log('\n[14] 首轮清理');
+q.tick();
+a(hidden(yq.bar), '阅读态划词工具条已隐藏');
+a(hidden(yq.barNewHash), 'CSS Module 哈希变化后（__NHFlD → __Xy8Qz）仍命中：未把哈希写死');
+a(hidden(yq.bareItem), '模块级兜底选择器生效：只剩 itemWrapper 的残缺结构也能隐藏');
+a(!hidden(yq.decoyTooltip), '同语义名、不同模块前缀的其它 tooltip 未被误伤');
+
+console.log('\n[15] 编辑态工具条');
+a(hidden(yq.editBar), '编辑态划词工具条已隐藏');
+a(hidden(yq.editBarReordered), '类名顺序变化 + 追加修饰类（is-visible）后仍命中');
+a(!hidden(yq.blockToolbar), '块级工具栏（只挂通用类 ne-card-toolbar）未被误伤');
+
+console.log('\n[16] 重新划词（工具条被页面重新显示）');
+yq.bar.style = mkStyle({ display: { v: 'flex' } });
+a(!hidden(yq.bar), '已模拟页面重新显示工具条、冲掉 display:none');
+q.tick();
+a(hidden(yq.bar), '下一轮清理自动补回隐藏');
+
+console.log('\n[17] 域名边界');
+const apx = yuqueFixture();
+const ap = run('yuque.com', apx);
+a(ap.started, '裸域 yuque.com 也生效（用户可能访问不带子域的地址）');
+const fake = yuqueFixture();
+const fk = run('notyuque.com', fake);
+a(!fk.started && fk.css === '', 'notyuque.com 这类仿冒域名不注入任何规则');
+a(!hidden(fake.bar), '非目标域名上的同名元素未被误伤');
 
 console.log(`\n结果：${pass} 通过 / ${fail} 失败\n`);
 process.exit(fail ? 1 : 0);
